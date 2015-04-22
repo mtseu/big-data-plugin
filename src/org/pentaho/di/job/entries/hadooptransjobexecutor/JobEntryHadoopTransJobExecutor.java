@@ -85,6 +85,8 @@ import org.pentaho.hadoop.shim.api.mapred.RunningJob;
 import org.pentaho.hadoop.shim.api.mapred.TaskCompletionEvent;
 import org.pentaho.hadoop.shim.api.mapred.TaskCompletionEvent.Status;
 import org.pentaho.hadoop.shim.spi.HadoopShim;
+import org.pentaho.hbase.shim.spi.HBaseConnection;
+import org.pentaho.hbase.shim.spi.HBaseShim;
 import org.pentaho.metastore.api.IMetaStore;
 import org.pentaho.metastore.api.exceptions.MetaStoreException;
 import org.w3c.dom.Node;
@@ -516,6 +518,7 @@ public class JobEntryHadoopTransJobExecutor extends JobEntryBase implements Clon
 
       HadoopConfiguration hadoopConfig = getHadoopConfiguration();
       HadoopShim shim = hadoopConfig.getHadoopShim();
+      
       ClassLoader loader = shim.getClass().getClassLoader();
       Configuration conf = shim.createConfiguration();
       String hadoopJobNameS = environmentSubstitute( hadoopJobName );
@@ -707,6 +710,7 @@ public class JobEntryHadoopTransJobExecutor extends JobEntryBase implements Clon
       List<String> configMessages = new ArrayList<String>();
       shim.configureConnectionInformation( hdfsHostnameS, hdfsPortS, jobTrackerHostnameS, jobTrackerPortS, conf,
           configMessages );
+      
       for ( String m : configMessages ) {
         logBasic( m );
       }
@@ -738,15 +742,19 @@ public class JobEntryHadoopTransJobExecutor extends JobEntryBase implements Clon
       conf.setOutputPath( outputPathPath );
 
       // process user defined values
+      Properties props = new Properties();
       for ( UserDefinedItem item : userDefined ) {
         if ( item.getName() != null
             && !"".equals( item.getName() ) && item.getValue() != null && !"".equals( item.getValue() ) ) { //$NON-NLS-1$ //$NON-NLS-2$
           String nameS = environmentSubstitute( item.getName() );
           String valueS = environmentSubstitute( item.getValue() );
           conf.set( nameS, valueS );
+          props.put( nameS, valueS );
         }
       }
 
+      configureHbase(hadoopConfig, conf, props);
+      
       conf.setJarByClass( shim.getPentahoMapReduceMapRunnerClass() );
 
       String numMapTasksS = environmentSubstitute( numMapTasks );
@@ -922,6 +930,23 @@ public class JobEntryHadoopTransJobExecutor extends JobEntryBase implements Clon
     }
 
     return result;
+  }
+
+  private void configureHbase( HadoopConfiguration hadoopConfig, Configuration conf, Properties props ) {
+    try {
+      HBaseShim hbShim = hadoopConfig.getHBaseShim();
+      HBaseConnection hbConn = hbShim.getHBaseConnection();
+      List<String> logMessages = new ArrayList<String>();
+      hbConn.configureConnection( props, logMessages );
+      for(String m : logMessages ) {
+        logBasic( m );
+      }
+      hbConn.obtainAuthTokenForJob( conf );
+    } catch(Exception e) {
+      if( log.isError() ) {
+        log.logError( "Failed to setup HBase", e );
+      }
+    }
   }
 
   /**
